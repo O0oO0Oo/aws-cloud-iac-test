@@ -1,3 +1,4 @@
+# Rds 모듈, main.tf
 ###########################
 # RDS 서브넷 그룹
 ###########################
@@ -8,6 +9,51 @@ resource "aws_db_subnet_group" "rds_subnet_group" {
   tags = {
     Name = "rds-subnet-group"
   }
+}
+
+resource "aws_secretsmanager_secret" "rds_credentials" {
+  name = "rds-proxy-credentials"
+  
+  tags = {
+    Name = "RDS Proxy Credentials"
+  }
+}
+
+# 6. IAM 정책 추가 (Secrets Manager 접근용)
+resource "aws_iam_policy" "rds_proxy_secrets_policy" {
+  name        = "rds-proxy-secrets-policy"
+  description = "Policy to allow RDS Proxy to access secrets in Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ],
+        Effect   = "Allow",
+        Resource = aws_secretsmanager_secret.rds_credentials.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "rds_proxy_secrets_attachment" {
+  role       = aws_iam_role.rds_proxy_role.name
+  policy_arn = aws_iam_policy.rds_proxy_secrets_policy.arn
+}
+
+resource "aws_secretsmanager_secret_version" "rds_credentials" {
+  secret_id = aws_secretsmanager_secret.rds_credentials.id
+  secret_string = jsonencode({
+    username             = var.db_username
+    password             = var.db_password != null && length(var.db_password) >= 8 ? var.db_password : "Password123!"
+    engine               = "mysql"
+    host                 = aws_db_instance.my_db.endpoint
+    port                 = 3306
+    dbClusterIdentifier  = aws_db_instance.my_db.id
+  })
 }
 
 ###########################
@@ -87,6 +133,7 @@ resource "aws_iam_role" "rds_proxy_role" {
 }
 
 # RDS 프록시 생성 (MySQL 엔진 패밀리)
+# 7. RDS 프록시 업데이트 (Secrets ARN 추가)
 resource "aws_db_proxy" "rds_proxy" {
   name                   = "my-rds-proxy"
   debug_logging          = true
@@ -101,7 +148,7 @@ resource "aws_db_proxy" "rds_proxy" {
     auth_scheme = "SECRETS"
     description = "RDS proxy authentication using Secrets Manager"
     iam_auth    = "DISABLED"
-    secret_arn  = "" # 연결할 Secrets Manager ARN을 입력하세요
+    secret_arn  = aws_secretsmanager_secret.rds_credentials.arn  # Secrets Manager ARN 추가
   }
 
   tags = {

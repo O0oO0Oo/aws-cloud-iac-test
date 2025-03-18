@@ -1,3 +1,4 @@
+# ecs module output.tf
 output "business_service_name" {
   description = "The name of the Spring ECS service"
   value       = aws_ecs_service.business_service.name

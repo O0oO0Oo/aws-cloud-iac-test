@@ -1,3 +1,4 @@
+# iam module, main.tf
 # RDS 접근만 허용하는 IAM 정책
 resource "aws_iam_policy" "rds_access_policy" {
   name        = "rds-access-policy"
@@ -37,24 +38,40 @@ resource "aws_iam_role" "ecs_rds_task_role" {
   })
 }
 
-# S3 접근만 허용하는 IAM 정책
-resource "aws_iam_policy" "s3_access_policy" {
-  name        = "s3-access-policy"
-  description = "Policy to allow access to S3 buckets"
-  policy      = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
-        Effect   = "Allow"
-        Resource = [
-          "${var.cdn_bucket_arn}/*",
-          var.cdn_bucket_arn
-        ]
-      }
+data "aws_iam_policy_document" "s3_access" {
+  statement {
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:DeleteObject",
+      "s3:ListMultipartUploadParts",
+      "s3:AbortMultipartUpload"
     ]
-  })
+    resources = [
+      "${var.cdn_bucket_arn}/*"
+    ]
+  }
+  
+  statement {
+    actions = [
+      "s3:ListBucket"
+    ]
+    resources = [
+      var.cdn_bucket_arn
+    ]
+  }
 }
+
+resource "aws_iam_policy" "s3_access_policy" {
+  name   = "s3-access-policy"
+  policy = data.aws_iam_policy_document.s3_access.json
+}
+
+resource "aws_iam_role_policy_attachment" "s3_access_attachment" {
+  role       = aws_iam_role.ecs_rds_s3_task_role.name
+  policy_arn = aws_iam_policy.s3_access_policy.arn
+}
+
 
 # RDS와 S3 접근을 위한 IAM 역할
 resource "aws_iam_role" "ecs_rds_s3_task_role" {

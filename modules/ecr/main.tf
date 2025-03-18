@@ -1,3 +1,4 @@
+# ecr module, main.tf
 resource "aws_ecr_repository" "business_service_repository" {
   name = "business-service"
   

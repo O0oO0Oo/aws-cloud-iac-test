@@ -1,15 +1,26 @@
+# CDN 모듈, main.tf
 # S3 버킷 생성
 resource "aws_s3_bucket" "cdn_bucket" {
   bucket        = var.bucket_name
   force_destroy = false
 
-  lifecycle { # 디스트로이 방지
-    prevent_destroy = true
-  }
+  # lifecycle { # 디스트로이 방지
+  #   prevent_destroy = true
+  # }
 
   tags = {
     Name = "CDN Bucket"
   }
+}
+
+# block public access 설정
+resource "aws_s3_bucket_public_access_block" "cdn_bucket_access" {
+  bucket = aws_s3_bucket.cdn_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # OAC 생성 (CloudFront에서 S3에 접근)
@@ -50,9 +61,9 @@ resource "aws_cloudfront_distribution" "cdn_distribution" {
   enabled             = true
   default_root_object = "index.html"
 
-  lifecycle { # 삭제 방지
-    prevent_destroy = true
-  }
+  # lifecycle { # 삭제 방지
+  #   prevent_destroy = true
+  # }
 
   origin {
     domain_name              = aws_s3_bucket.cdn_bucket.bucket_regional_domain_name
@@ -86,6 +97,8 @@ resource "aws_cloudfront_distribution" "cdn_distribution" {
       restriction_type = "none"
     }
   }
+
+  aliases = ["cdn.lets-leave.com"]
 
   tags = {
     Name = "CloudFront CDN"

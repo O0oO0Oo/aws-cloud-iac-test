@@ -1,27 +1,39 @@
+# web module, main.tf
 # 외부에서 ALB를 위한 보안 그룹 생성
 resource "aws_security_group" "alb_sg" {
-  name        = "web-server-sg"
-  description = "Security Group for web servers"
-  vpc_id      = var.vpc_id # 네트워크 모듈에서 전달받은 vpc_id 사용
+  name        = "alb-sg"
+  description = "Security group for ALB"
+  vpc_id      = var.vpc_id
 
-  # HTTPS 트래픽 허용
+  # HTTPS 허용
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow HTTPS traffic"
   }
 
-  # 모든 아웃바운드 트래픽 허용
+  # HTTP 허용 (HTTPS로 리다이렉트)
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow HTTP traffic"
+  }
+
+  # 아웃바운드 트래픽 허용
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = {
-    Name = "Web Server SG"
+    Name = "ALB-SG"
   }
 }
 
@@ -31,15 +43,17 @@ resource "aws_lb_target_group" "business_tg" {
   port     = 8080
   protocol = "HTTP"
   vpc_id   = var.vpc_id
-
+  target_type = "ip"
+  
   health_check {
-    protocol            = "HTTP"
-    port                = "8080"
-    path                = "/health"  // 헬스체크 엔드포인트에 맞게 수정 <- 이거 액츄에이터 설정
+    enabled             = true
     interval            = 30
+    path                = "/actuator/health"  # Spring Boot Actuator Health 엔드포인트
+    port                = "traffic-port"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
     timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
+    matcher             = "200"
   }
 
   tags = {
@@ -47,21 +61,7 @@ resource "aws_lb_target_group" "business_tg" {
   }
 }
 
-// HTTPS 리스너 (ACM 인증서를 사용하여 HTTPS 요청을 Target Group으로 포워딩) < 내부 business 서버로
-resource "aws_lb_listener" "application_alb_https_listener" {
-  load_balancer_arn = aws_lb.application_alb.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
-  certificate_arn   = var.ssl_certificate_arn
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.business_tg.arn
-  }
-}
-
-# ALB 보안 그룹 사용
+# ALB
 resource "aws_lb" "application_alb" {
   name               = "lets-leave-alb"
   internal           = false
@@ -76,20 +76,25 @@ resource "aws_lb" "application_alb" {
   }
 }
 
-# CloudWatch 로그 그룹 생성
-resource "aws_cloudwatch_log_group" "alb_logs" {
-  name              = "/aws/alb/lets-leave-alb"
-  retention_in_days = 30
 
-  tags = {
-    Name = "ALB-Logs"
+// HTTPS 리스너 (ACM 인증서를 사용하여 HTTPS 요청을 Target Group으로 포워딩) < 내부 business 서버로
+resource "aws_lb_listener" "application_alb_https_listener" {
+  load_balancer_arn = aws_lb.application_alb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = var.ssl_certificate_arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.business_tg.arn
   }
 }
 
 # HTTP 리스너 80을 443, HTTPS로 리디렉션
 resource "aws_lb_listener" "application_alb_http_listener" {
   load_balancer_arn = aws_lb.application_alb.arn
-  port              = 80
+  port              = "80"
   protocol          = "HTTP"
 
   default_action {
@@ -109,18 +114,39 @@ data "aws_route53_zone" "lets_leave" {
 
 # ALB의 DNS 이름을 lets-leave.com 도메인에 A 레코드로 추가
 resource "aws_route53_record" "lets_leave_record" {
-  zone_id = data.aws_route53_zone.lets_leave.zone_id # Route 53 호스티드 존 ID
+  zone_id = data.aws_route53_zone.lets_leave.zone_id
   name    = "lets-leave.com"
   type    = "A"
-  ttl     = 300
-  records = [aws_lb.application_alb.dns_name]
+
+  alias {
+    name                   = aws_lb.application_alb.dns_name
+    zone_id                = aws_lb.application_alb.zone_id
+    evaluate_target_health = true
+  }
 }
 
 # www.lets-leave.com에 대한 CNAME 레코드 추가 (www 서브도 HTTPS로 리디렉션)
 resource "aws_route53_record" "www_lets_leave_record" {
-  zone_id = data.aws_route53_zone.lets_leave.zone_id # Route 53 호스티드 존 ID
+    zone_id = data.aws_route53_zone.lets_leave.zone_id
   name    = "www.lets-leave.com"
-  type    = "CNAME"
-  ttl     = 300
-  records = [aws_lb.application_alb.dns_name] # ALB의 DNS 이름을 www 서브에 연결
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.application_alb.dns_name
+    zone_id                = aws_lb.application_alb.zone_id
+    evaluate_target_health = true
+  }
+}
+
+# cdn.lets-leave.com에 대한 CNAME 레코드 추가
+resource "aws_route53_record" "cdn_lets_leave_record" {
+  zone_id = data.aws_route53_zone.lets_leave.zone_id
+  name    = "cdn.lets-leave.com"
+  type    = "A"
+
+  alias {
+    name                   = var.cdn_alias_name # cdn domain name
+    zone_id                = var.cdn_alias_zone_id # cdn zon id
+    evaluate_target_health = false
+  }
 }

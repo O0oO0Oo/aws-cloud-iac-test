@@ -1,3 +1,4 @@
+# ecs module variables
 variable "cluster_name" {
   description = "The name of the ECS cluster"
   type        = string
@@ -49,5 +50,10 @@ variable "ecr_recommend_repository_url" {
 
 variable "ecr_business_repository_url" {
   description = "ecr_business_repository_url"
+  type        = string
+}
+
+variable "cdn_bucket_name" {
+  description = "cdn_bucket_name"
   type        = string
 }
