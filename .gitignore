@@ -102,3 +102,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/helm,terraform,visualstudiocode,windows,linux
+
+# Development environment code
+environments/dev
